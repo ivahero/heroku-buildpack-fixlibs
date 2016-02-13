@@ -1,4 +1,65 @@
 #!/usr/bin/env bash
-ln -s /app/.apt/usr/bin "$1/xub"
+set -e
+
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+LP_DIR=$(cd $(dirname $0); cd ..; pwd)
+
+mkdir -p $CACHE_DIR
+
 # Fix xkbcomp path by rewriting Xvfb binary.
-sed -i s:/usr/bin:/app/xub: "$1/.apt/usr/bin/Xvfb"
+XVFB_SCRIPT=$BUILD_DIR/.apt/usr/bin/Xvfb
+if [ -e $XVFB_SCRIPT ]; then
+  echo "-----> Patching Xvfb"
+  ln -s /app/.apt/usr/bin $BUILD_DIR/xub
+  sed -i s:/usr/bin:/app/xub: $XVFB_SCRIPT
+else
+  echo "-----> Xvfb not found"
+fi
+
+# Download and install chromedriver
+CHROMEDRIVER_VERSION_DEFAULT=2.21
+
+ENV_CHROMEDRIVER_VERSION="$ENV_DIR/CHROMEDRIVER_VERSION"
+[ -e $ENV_CHROMEDRIVER_VERSION ] && CHROMEDRIVER_VERSION=$(cat $ENV_CHROMEDRIVER_VERSION)
+
+[ -z "$CHROMEDRIVER_VERSION" ] && CHROMEDRIVER_VERSION=disable
+
+if [ $CHROMEDRIVER_VERSION = no ] || [ $CHROMEDRIVER_VERSION = false ] || [ $CHROMEDRIVER_VERSION = 0 ]; then
+  CHROMEDRIVER_VERSION=disable
+fi
+
+if [ $CHROMEDRIVER_VERSION = enable ] || [ $CHROMEDRIVER_VERSION = default ] || [ $CHROMEDRIVER_VERSION = yes ] || [ $CHROMEDRIVER_VERSION = true ]; then
+  CHROMEDRIVER_VERSION=$CHROMEDRIVER_VERSION_DEFAULT
+fi
+
+CHROMEDRIVER_URL="http://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip"
+CHROMEDRIVER_FILE="${CACHE_DIR}/chromedriver_linux64_${CHROMEDRIVER_VERSION}.zip"
+
+if [ $CHROMEDRIVER_VERSION = disable ]; then
+  echo "-----> Chromedriver is disabled"
+else
+  if ! [ -e $CHROMEDRIVER_FILE ]; then
+    echo "-----> Downloading $CHROMEDRIVER_URL"
+    curl $CHROMEDRIVER_URL --location --fail --silent --show-error -o $CHROMEDRIVER_FILE
+  fi
+
+  echo "-----> Extracting Chromedriver binaries"
+  BIN_DIR="$BUILD_DIR/.apt/usr/bin"
+  test -d $BIN_DIR || mkdir -p $BIN_DIR
+  unzip -q $CHROMEDRIVER_FILE chromedriver -d $BIN_DIR
+
+  # 32-bit libraries for Chrome
+  LIBS32_FILE="lib-14_04-i386-linux-gnu.tar.gz"
+  LIBS32_URL="https://github.com/ivandeex/lib-14_04-i386-linux-gnu/raw/master/$LIBS32_FILE"
+  LIBS32_PATH="$CACHE_DIR/$LIBS32_FILE"
+  if ! [ -e $LIBS32_PATH ]; then
+    echo "-----> Downloading $LIBS32_URL"
+    curl $LIBS32_URL --location --fail --silent --show-error -o $LIBS32_PATH
+  fi
+  echo "-----> Installing 32-bit libraries for Chromedriver"
+  LIB_DIR="$BUILD_DIR/.apt/usr/lib"
+  test -d $LIB_DIR || mkdir -p $LIB_DIR
+  tar -C $LIB_DIR -xpzf $LIBS32_PATH
+fi
